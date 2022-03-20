@@ -179,7 +179,18 @@ def create_float_feature(values):
 def create_training_instances(input_files, tokenizer, max_seq_length,
                               dupe_factor, short_seq_prob, masked_lm_prob,
                               max_predictions_per_seq, rng):
-  """Create `TrainingInstance`s from raw text."""
+  """Create `TrainingInstance`s from raw text.
+  @input_files: 语料文件
+  @tokenizer: 分词器
+  @max_seq_length: 句子最大长度
+  @dupe_factor:
+  @short_seq_prob:
+  @masked_lm_prob:
+  @max_predictions_per_seq:
+  @rng:
+
+  """
+  # all_documments用来存储所有段落句子分词后结果
   all_documents = [[]]
 
   # Input file format:
@@ -191,6 +202,7 @@ def create_training_instances(input_files, tokenizer, max_seq_length,
   for input_file in input_files:
     with tf.gfile.GFile(input_file, "r") as reader:
       while True:
+        # 将句子转成unicode, 一个句子一行
         line = tokenization.convert_to_unicode(reader.readline())
         if not line:
           break
@@ -199,22 +211,22 @@ def create_training_instances(input_files, tokenizer, max_seq_length,
         # Empty lines are used as document delimiters
         if not line:
           all_documents.append([])
+        # 对句子进行分词
+        # ['this', 'text', 'is', 'included', 'to', 'make', 'sure', 'un', '##ico', '##de', 'is', 'handled', 'properly', ':', '力', '[UNK]', '[UNK]', '北', '[UNK]', '[UNK]']
         tokens = tokenizer.tokenize(line)
         if tokens:
           all_documents[-1].append(tokens)
-
+  #all_documents: [[['this', 'text', 'is', 'included', 'to', 'make', 'sure', 'un', '##ico', '##de', 'is', 'handled', 'properly', ':', '力', '[UNK]', '[UNK]', '北', '[UNK]', '[UNK]'], ['text', 'should', 'be', 'one', '-', 'sentence', '-', 'per', '-', 'line', ',', 'with', 'empty', 'lines', 'between', 'documents', '.']]]
   # Remove empty documents
   all_documents = [x for x in all_documents if x]
+  # 随机打乱
   rng.shuffle(all_documents)
 
   vocab_words = list(tokenizer.vocab.keys())
   instances = []
   for _ in range(dupe_factor):
     for document_index in range(len(all_documents)):
-      instances.extend(
-          create_instances_from_document(
-              all_documents, document_index, max_seq_length, short_seq_prob,
-              masked_lm_prob, max_predictions_per_seq, vocab_words, rng))
+      instances.extend(create_instances_from_document(all_documents, document_index, max_seq_length, short_seq_prob, masked_lm_prob, max_predictions_per_seq, vocab_words, rng))
 
   rng.shuffle(instances)
   return instances
@@ -227,6 +239,7 @@ def create_instances_from_document(
   document = all_documents[document_index]
 
   # Account for [CLS], [SEP], [SEP]
+  # 序列中包含三个特殊标记，有效最大序列长度需要排除这三个标记
   max_num_tokens = max_seq_length - 3
 
   # We *usually* want to fill up the entire sequence since we are padding
@@ -249,15 +262,18 @@ def create_instances_from_document(
   current_chunk = []
   current_length = 0
   i = 0
+  # 单篇文章
   while i < len(document):
     segment = document[i]
     current_chunk.append(segment)
     current_length += len(segment)
+    # 当选择句子（多个句子）总长度大于等于最大序列长度
     if i == len(document) - 1 or current_length >= target_seq_length:
       if current_chunk:
         # `a_end` is how many segments from `current_chunk` go into the `A`
         # (first) sentence.
         a_end = 1
+        # 随机选择前a_end个句子作为序列a
         if len(current_chunk) >= 2:
           a_end = rng.randint(1, len(current_chunk) - 1)
 
@@ -268,34 +284,43 @@ def create_instances_from_document(
         tokens_b = []
         # Random next
         is_random_next = False
+        # 如果当前只有一个句子或者概率小于0.5，则随机选择一个句子b
         if len(current_chunk) == 1 or rng.random() < 0.5:
           is_random_next = True
+          # b序列的长度
           target_b_length = target_seq_length - len(tokens_a)
 
           # This should rarely go for more than one iteration for large
           # corpora. However, just to be careful, we try to make sure that
           # the random document is not the same as the document
           # we're processing.
+          # 从非当前段落中随机选择
           for _ in range(10):
             random_document_index = rng.randint(0, len(all_documents) - 1)
             if random_document_index != document_index:
               break
 
           random_document = all_documents[random_document_index]
+          # 从选择的段落中，随机选择一个起始位置
           random_start = rng.randint(0, len(random_document) - 1)
+          # 从选择的开始位置开始往后进行找句子，当句子总长度大于b序列的长度时停止
           for j in range(random_start, len(random_document)):
             tokens_b.extend(random_document[j])
             if len(tokens_b) >= target_b_length:
               break
           # We didn't actually use these segments so we "put them back" so
           # they don't go to waste.
+          # 序列a使用的是current_chunk[i, a_end]，为了不浪费current_chunk[a_end, len(current_chunk))
+          # 修改i的index
           num_unused_segments = len(current_chunk) - a_end
           i -= num_unused_segments
         # Actual next
         else:
           is_random_next = False
+          # 序列a确定后，后面的作为b
           for j in range(a_end, len(current_chunk)):
             tokens_b.extend(current_chunk[j])
+        # 对序列a和序列b截断使其长度和不大于max_num_tokens
         truncate_seq_pair(tokens_a, tokens_b, max_num_tokens, rng)
 
         assert len(tokens_a) >= 1
@@ -436,6 +461,7 @@ def truncate_seq_pair(tokens_a, tokens_b, max_num_tokens, rng):
 def main(_):
   tf.logging.set_verbosity(tf.logging.INFO)
 
+  print('DEBUG:\n', FLAGS.vocab_file)
   tokenizer = tokenization.FullTokenizer(
       vocab_file=FLAGS.vocab_file, do_lower_case=FLAGS.do_lower_case)
 
@@ -448,11 +474,7 @@ def main(_):
     tf.logging.info("  %s", input_file)
 
   rng = random.Random(FLAGS.random_seed)
-  instances = create_training_instances(
-      input_files, tokenizer, FLAGS.max_seq_length, FLAGS.dupe_factor,
-      FLAGS.short_seq_prob, FLAGS.masked_lm_prob, FLAGS.max_predictions_per_seq,
-      rng)
-
+  instances = create_training_instances(input_files, tokenizer, FLAGS.max_seq_length, FLAGS.dupe_factor, FLAGS.short_seq_prob, FLAGS.masked_lm_prob, FLAGS.max_predictions_per_seq, rng)
   output_files = FLAGS.output_file.split(",")
   tf.logging.info("*** Writing to output files ***")
   for output_file in output_files:
