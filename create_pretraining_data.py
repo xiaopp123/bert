@@ -180,14 +180,16 @@ def create_training_instances(input_files, tokenizer, max_seq_length,
                               dupe_factor, short_seq_prob, masked_lm_prob,
                               max_predictions_per_seq, rng):
   """Create `TrainingInstance`s from raw text.
-  @input_files: 语料文件
-  @tokenizer: 分词器
-  @max_seq_length: 句子最大长度
-  @dupe_factor:
-  @short_seq_prob:
-  @masked_lm_prob:
-  @max_predictions_per_seq:
-  @rng:
+
+  Args:
+    input_files: 语料文件
+    tokenizer: 分词器
+    max_seq_length: 句子最大长度
+    dupe_factor:
+    short_seq_prob:
+    masked_lm_prob:
+    max_predictions_per_seq:
+    rng:
 
   """
   # all_documments用来存储所有段落句子分词后结果
@@ -226,7 +228,15 @@ def create_training_instances(input_files, tokenizer, max_seq_length,
   instances = []
   for _ in range(dupe_factor):
     for document_index in range(len(all_documents)):
-      instances.extend(create_instances_from_document(all_documents, document_index, max_seq_length, short_seq_prob, masked_lm_prob, max_predictions_per_seq, vocab_words, rng))
+      instances.extend(
+        create_instances_from_document(
+          all_documents,
+          document_index,
+          max_seq_length,
+          short_seq_prob,
+          masked_lm_prob,
+          max_predictions_per_seq,
+          vocab_words, rng))
 
   rng.shuffle(instances)
   return instances
@@ -343,9 +353,12 @@ def create_instances_from_document(
         tokens.append("[SEP]")
         segment_ids.append(1)
 
+        # 构建mask language model
+        # tokens是mask后的序列，masked_lm_positions和masked_lm_labels分别是mask token的索引和标签
         (tokens, masked_lm_positions,
          masked_lm_labels) = create_masked_lm_predictions(
              tokens, masked_lm_prob, max_predictions_per_seq, vocab_words, rng)
+        # 将当前tokens序列创建成instance对象
         instance = TrainingInstance(
             tokens=tokens,
             segment_ids=segment_ids,
@@ -366,8 +379,20 @@ MaskedLmInstance = collections.namedtuple("MaskedLmInstance",
 
 def create_masked_lm_predictions(tokens, masked_lm_prob,
                                  max_predictions_per_seq, vocab_words, rng):
-  """Creates the predictions for the masked LM objective."""
+  """Creates the predictions for the masked LM objective.
 
+  Args:
+    tokens: 序列a与序列b构建的tokens
+    masked_lm_prob: mask概率，默认0.15
+    max_predictions_per_seq: 单个序列中最多允许mask的token数量
+    vocab_words: 词表
+    rng: 随机数生成器
+
+  Returns:
+
+  """
+
+  # 选择mask的候选单词索引列表
   cand_indexes = []
   for (i, token) in enumerate(tokens):
     if token == "[CLS]" or token == "[SEP]":
@@ -387,15 +412,18 @@ def create_masked_lm_predictions(tokens, masked_lm_prob,
     else:
       cand_indexes.append([i])
 
+  # 随机打乱jj
   rng.shuffle(cand_indexes)
 
   output_tokens = list(tokens)
 
+  # 当前序列需要mask的个数
   num_to_predict = min(max_predictions_per_seq,
                        max(1, int(round(len(tokens) * masked_lm_prob))))
 
   masked_lms = []
   covered_indexes = set()
+  # 从mask候选单词集合中选择num_to_predict个
   for index_set in cand_indexes:
     if len(masked_lms) >= num_to_predict:
       break
@@ -404,12 +432,14 @@ def create_masked_lm_predictions(tokens, masked_lm_prob,
     if len(masked_lms) + len(index_set) > num_to_predict:
       continue
     is_any_index_covered = False
+    # 如果token已经mask过了就不需要再mask
     for index in index_set:
       if index in covered_indexes:
         is_any_index_covered = True
         break
     if is_any_index_covered:
       continue
+    # 对当前token进行mask
     for index in index_set:
       covered_indexes.add(index)
 
@@ -462,9 +492,11 @@ def main(_):
   tf.logging.set_verbosity(tf.logging.INFO)
 
   print('DEBUG:\n', FLAGS.vocab_file)
+  # 分词器
   tokenizer = tokenization.FullTokenizer(
       vocab_file=FLAGS.vocab_file, do_lower_case=FLAGS.do_lower_case)
 
+  # 输入支持多个输入
   input_files = []
   for input_pattern in FLAGS.input_file.split(","):
     input_files.extend(tf.gfile.Glob(input_pattern))
@@ -473,13 +505,16 @@ def main(_):
   for input_file in input_files:
     tf.logging.info("  %s", input_file)
 
+  # 随机数生成器
   rng = random.Random(FLAGS.random_seed)
+  # 构建序列列表
   instances = create_training_instances(input_files, tokenizer, FLAGS.max_seq_length, FLAGS.dupe_factor, FLAGS.short_seq_prob, FLAGS.masked_lm_prob, FLAGS.max_predictions_per_seq, rng)
   output_files = FLAGS.output_file.split(",")
   tf.logging.info("*** Writing to output files ***")
   for output_file in output_files:
     tf.logging.info("  %s", output_file)
 
+  # 保存序列列表
   write_instance_to_example_files(instances, tokenizer, FLAGS.max_seq_length,
                                   FLAGS.max_predictions_per_seq, output_files)
 
