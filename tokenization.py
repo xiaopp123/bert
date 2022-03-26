@@ -75,6 +75,7 @@ def validate_case_matches_checkpoint(do_lower_case, init_checkpoint):
                                           model_name, case_name, opposite_flag))
 
 
+# 将text转成unicode编码
 def convert_to_unicode(text):
   """Converts `text` to Unicode (if it's not already), assuming utf-8 input."""
   if six.PY3:
@@ -195,6 +196,7 @@ class BasicTokenizer(object):
 
   def tokenize(self, text):
     """Tokenizes a piece of text."""
+    # 将text转成unicode
     text = convert_to_unicode(text)
     text = self._clean_text(text)
 
@@ -204,11 +206,13 @@ class BasicTokenizer(object):
     # and generally don't have any Chinese data in them (there are Chinese
     # characters in the vocabulary because Wikipedia does have some Chinese
     # words in the English Wikipedia.).
+    # 中文按字符分开，即在中文字符前后分别添加空格
     text = self._tokenize_chinese_chars(text)
-
+    # 按空格分开
     orig_tokens = whitespace_tokenize(text)
     split_tokens = []
     for token in orig_tokens:
+      # 小写化
       if self.do_lower_case:
         token = token.lower()
         token = self._run_strip_accents(token)
@@ -219,9 +223,13 @@ class BasicTokenizer(object):
 
   def _run_strip_accents(self, text):
     """Strips accents from a piece of text."""
+    # 比如"Málaga"，经过标准化后为['M', 'a', '́', 'l', 'a', 'g', 'a']，
+    # 删除无间隔标记符即删除a上上面的特殊字符
+    # unicode标准化处理, 某些字符能够使用多种合法的编码表示
     text = unicodedata.normalize("NFD", text)
     output = []
     for char in text:
+      # 删除无间隔标记符
       cat = unicodedata.category(char)
       if cat == "Mn":
         continue
@@ -230,6 +238,7 @@ class BasicTokenizer(object):
 
   def _run_split_on_punc(self, text):
     """Splits punctuation on a piece of text."""
+    # 按标点符号分割
     chars = list(text)
     i = 0
     start_new_word = True
@@ -261,6 +270,7 @@ class BasicTokenizer(object):
         output.append(char)
     return "".join(output)
 
+  # 中文字符
   def _is_chinese_char(self, cp):
     """Checks whether CP is the codepoint of a CJK character."""
     # This defines a "chinese character" as anything in the CJK Unicode block:
@@ -286,6 +296,9 @@ class BasicTokenizer(object):
   def _clean_text(self, text):
     """Performs invalid character removal and whitespace cleanup on text."""
     output = []
+    # https://izualzhy.cn/interesting-encode
+    # cp == 0xfffd是替换符
+    # todo cp == 0
     for char in text:
       cp = ord(char)
       if cp == 0 or cp == 0xfffd or _is_control(char):
@@ -305,6 +318,7 @@ class WordpieceTokenizer(object):
     self.unk_token = unk_token
     self.max_input_chars_per_word = max_input_chars_per_word
 
+  # 最长贪心匹配算法找到
   def tokenize(self, text):
     """Tokenizes a piece of text into its word pieces.
 
