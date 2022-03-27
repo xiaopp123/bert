@@ -154,6 +154,7 @@ class BertModel(object):
         is invalid.
     """
     config = copy.deepcopy(config)
+    # 预测过程中dropout为0
     if not is_training:
       config.hidden_dropout_prob = 0.0
       config.attention_probs_dropout_prob = 0.0
@@ -686,7 +687,7 @@ def attention_layer(from_tensor,
       name="value",
       kernel_initializer=create_initializer(initializer_range))
 
-  # `query_layer` = [B, N, F, H]
+  # `query_layer` = [Batch_size, Number_attention_heads, sequence_legth, H]
   query_layer = transpose_for_scores(query_layer, batch_size,
                                      num_attention_heads, from_seq_length,
                                      size_per_head)
@@ -699,6 +700,7 @@ def attention_layer(from_tensor,
   # attention scores.
   # `attention_scores` = [B, N, F, T]
   attention_scores = tf.matmul(query_layer, key_layer, transpose_b=True)
+  # 为什么归一化
   attention_scores = tf.multiply(attention_scores,
                                  1.0 / math.sqrt(float(size_per_head)))
 
@@ -721,6 +723,7 @@ def attention_layer(from_tensor,
 
   # This is actually dropping out entire tokens to attend to, which might
   # seem a bit unusual, but is taken from the original Transformer paper.
+  # 注意，对attention score dropout
   attention_probs = dropout(attention_probs, attention_probs_dropout_prob)
 
   # `value_layer` = [B, T, N, H]
@@ -820,6 +823,7 @@ def transformer_model(input_tensor,
   # forth from a 3D tensor to a 2D tensor. Re-shapes are normally free on
   # the GPU/CPU but may not be free on the TPU, so we want to minimize them to
   # help the optimizer.
+  # [batch_size * seq_length, hidden_size]
   prev_output = reshape_to_matrix(input_tensor)
 
   all_layer_outputs = []
@@ -866,7 +870,7 @@ def transformer_model(input_tensor,
       with tf.variable_scope("intermediate"):
         intermediate_output = tf.layers.dense(
             attention_output,
-            intermediate_size,
+            intermediate_size,   # 升维
             activation=intermediate_act_fn,
             kernel_initializer=create_initializer(initializer_range))
 
@@ -874,7 +878,7 @@ def transformer_model(input_tensor,
       with tf.variable_scope("output"):
         layer_output = tf.layers.dense(
             intermediate_output,
-            hidden_size,
+            hidden_size,    # 降维
             kernel_initializer=create_initializer(initializer_range))
         layer_output = dropout(layer_output, hidden_dropout_prob)
         layer_output = layer_norm(layer_output + attention_output)

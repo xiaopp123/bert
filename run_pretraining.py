@@ -141,10 +141,12 @@ def model_fn_builder(bert_config, init_checkpoint, learning_rate,
          bert_config, model.get_sequence_output(), model.get_embedding_table(),
          masked_lm_positions, masked_lm_ids, masked_lm_weights)
 
+    # next sentence predication, 输入是[cls] embedding
     (next_sentence_loss, next_sentence_example_loss,
      next_sentence_log_probs) = get_next_sentence_output(
          bert_config, model.get_pooled_output(), next_sentence_labels)
 
+    # MLM和next sentence prediction损失相加
     total_loss = masked_lm_loss + next_sentence_loss
 
     tvars = tf.trainable_variables()
@@ -239,7 +241,16 @@ def model_fn_builder(bert_config, init_checkpoint, learning_rate,
 
 def get_masked_lm_output(bert_config, input_tensor, output_weights, positions,
                          label_ids, label_weights):
-  """Get loss and log probs for the masked LM."""
+  """Get loss and log probs for the masked LM.
+  Args:
+       bert_config：bert配置文件
+       input_tensor：序列embedding，[batch_size, seq_length, hidden_size]
+       output_weights：对应是word embedding table, [vocab_size, hidden_size]
+       positions：mask的token在当前序列位置
+       label_ids：mask的token真实标签
+       label_weights：mask的token权重
+  """
+  # 获取mask token的embedding
   input_tensor = gather_indexes(input_tensor, positions)
 
   with tf.variable_scope("cls/predictions"):
@@ -260,8 +271,10 @@ def get_masked_lm_output(bert_config, input_tensor, output_weights, positions,
         "output_bias",
         shape=[bert_config.vocab_size],
         initializer=tf.zeros_initializer())
+    # 这里的输出网络权重用的是embedding table
     logits = tf.matmul(input_tensor, output_weights, transpose_b=True)
     logits = tf.nn.bias_add(logits, output_bias)
+    # 这里的输出是全词表的概率，求softmax耗时没有影响吗？不负采样这样？
     log_probs = tf.nn.log_softmax(logits, axis=-1)
 
     label_ids = tf.reshape(label_ids, [-1])
@@ -295,6 +308,7 @@ def get_next_sentence_output(bert_config, input_tensor, labels):
     output_bias = tf.get_variable(
         "output_bias", shape=[2], initializer=tf.zeros_initializer())
 
+    # 二分类任务，损失为交叉熵
     logits = tf.matmul(input_tensor, output_weights, transpose_b=True)
     logits = tf.nn.bias_add(logits, output_bias)
     log_probs = tf.nn.log_softmax(logits, axis=-1)
@@ -352,6 +366,7 @@ def input_fn_builder(input_files,
     # For training, we want a lot of parallel reading and shuffling.
     # For eval, we want no shuffling and parallel reading doesn't matter.
     if is_training:
+      # 读取文件
       d = tf.data.Dataset.from_tensor_slices(tf.constant(input_files))
       d = d.repeat()
       d = d.shuffle(buffer_size=len(input_files))
@@ -361,10 +376,12 @@ def input_fn_builder(input_files,
 
       # `sloppy` mode means that the interleaving is not exact. This adds
       # even more randomness to the training pipeline.
+      # parallel_interleave：https://www.tensorflow.org/api_docs/python/tf/data/experimental/parallel_interleave
+      # 并行读取
       d = d.apply(
           tf.contrib.data.parallel_interleave(
-              tf.data.TFRecordDataset,
-              sloppy=is_training,
+              tf.data.TFRecordDataset,  # map_func
+              sloppy=is_training,  # sloppy为true数据有序，可以复现
               cycle_length=cycle_length))
       d = d.shuffle(buffer_size=100)
     else:
@@ -377,6 +394,7 @@ def input_fn_builder(input_files,
     # size dimensions. For eval, we assume we are evaluating on the CPU or GPU
     # and we *don't* want to drop the remainder, otherwise we wont cover
     # every sample.
+    # 解析TFrecord
     d = d.apply(
         tf.contrib.data.map_and_batch(
             lambda record: _decode_record(record, name_to_features),
@@ -458,6 +476,7 @@ def main(_):
   if FLAGS.do_train:
     tf.logging.info("***** Running training *****")
     tf.logging.info("  Batch size = %d", FLAGS.train_batch_size)
+    # 读取训练文件函数
     train_input_fn = input_fn_builder(
         input_files=input_files,
         max_seq_length=FLAGS.max_seq_length,
